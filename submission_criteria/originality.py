@@ -52,7 +52,6 @@ def get_submission(db_manager, filemanager, submission_id):
         logging.getLogger().info("Could not get submission {} at S3 path {}".format(submission_id, s3_filename))
         return None
 
-
     df = pd.read_hdf(local_file, 'submission_data')
 
     assert "id" in df.columns, "No id column in submission {}".format(s3_filename)
