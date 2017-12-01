@@ -60,6 +60,7 @@ class FileManager(object):
                         self.s3.meta.client.download_fileobj(self.bucket, s3_file, data_file)
                         df = pd.read_csv(data_file)
                         df.to_hdf(full_filename.replace('.csv', '.hd5'), 'submission_data')
+
                 except botocore.exceptions.EndpointConnectionError:
 
                     if self.log:
