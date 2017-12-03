@@ -26,10 +26,10 @@ from xgboost.sklearn import XGBClassifier
 # needed for module level import
 sys.path.insert(0, os.path.dirname(os.path.dirname(sys.argv[0])))
 
-from tests.testing_api import NumerAPI
-from submission_criteria.concordance import get_sorted_split
-from submission_criteria.concordance import has_concordance
-from submission_criteria.concordance import get_competition_variables_from_df
+from tests.testing_api import NumerAPI  # pylint: disable=E402
+from submission_criteria.concordance import get_sorted_split  # pylint: disable=E402
+from submission_criteria.concordance import has_concordance  # pylint: disable=E402
+from submission_criteria.concordance import get_competition_variables_from_df  # pylint: disable=E402
 
 
 DATA_SET_PATH = 'tests/numerai_datasets'
