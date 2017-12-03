@@ -252,7 +252,7 @@ def fit_clf(X, Y, clf):
     clf_str = str(clf).split("(")[0]
     clf.fit(X, Y)
     time_taken = '%.2fs' % (time.time() - before)
-    logger.info('fit() took %s%s (%s)' % (time_taken, ' '*(9-len(time_taken)), clf_str))
+    logger.info('fit() took %s%s (%s)' % (time_taken, ' ' * (9 - len(time_taken)), clf_str))
     return clf_str
 
 
@@ -312,8 +312,8 @@ def predict_and_upload_mix(napi, clfs: list, tournament_data: pd.DataFrame, x_pr
 
     checked_combos = set()
 
-    for i, clf1 in enumerate(clfs[:len(clfs)//2]):
-        for j, clf2 in enumerate(clfs[:len(clfs)//2]):
+    for i, clf1 in enumerate(clfs[:len(clfs) // 2]):
+        for j, clf2 in enumerate(clfs[:len(clfs) // 2]):
             if i == j:
                 continue
 
