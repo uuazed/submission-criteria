@@ -154,6 +154,9 @@ class NumerAPI(object):
 
     def upload_prediction(self, file_path) -> int:
         # until issues with the api is solved, just say 'all ok'
+        import time
+        # simulate uploading is slow
+        time.sleep(3)
         return 200
 
         filename, signedRequest, headers, status_code = self.authorize(file_path)
