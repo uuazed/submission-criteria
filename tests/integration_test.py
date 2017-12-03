@@ -5,7 +5,6 @@
 import os
 import logging
 import time
-import asyncio
 
 from concurrent import futures
 from concurrent.futures import ThreadPoolExecutor
@@ -24,8 +23,8 @@ from xgboost.sklearn import XGBClassifier
 # First Party
 from testing_api import NumerAPI
 
-DATA_SET_PATH = 'numerai_datasets'
-test_csv = "test_csv"
+DATA_SET_PATH = 'tests/numerai_datasets'
+test_csv = "tests/test_csv"
 clf_n_jobs = 2
 
 logging.basicConfig(
