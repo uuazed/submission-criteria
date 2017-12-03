@@ -6,10 +6,8 @@ import os
 import logging
 import time
 import traceback
-from uuid import uuid4 as uuid
-
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(sys.argv[0])))
+from uuid import uuid4 as uuid
 
 from concurrent import futures
 from concurrent.futures import ThreadPoolExecutor
@@ -25,11 +23,14 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
 from xgboost.sklearn import XGBClassifier
 
-# First Party
+# needed for module level import
+sys.path.insert(0, os.path.dirname(os.path.dirname(sys.argv[0])))
+
 from tests.testing_api import NumerAPI
 from submission_criteria.concordance import get_sorted_split
 from submission_criteria.concordance import has_concordance
 from submission_criteria.concordance import get_competition_variables_from_df
+
 
 DATA_SET_PATH = 'tests/numerai_datasets'
 test_csv = "tests/test_csv"
@@ -124,7 +125,7 @@ def main():
     napi.set_data(tournament_data, training_data)
 
     features = [f for f in list(training_data) if "feature" in f]
-    features = features[:len(features)//2]  # just use half, speed things up a bit
+    features = features[:len(features) // 2]  # just use half, speed things up a bit
     X, Y = training_data[features], training_data["target"]
 
     x_prediction = tournament_data[features]
@@ -146,15 +147,15 @@ def main():
 
     before = time.time()
     fit_all(clfs, X, Y)
-    logger.info('all clfs fit() took %.2fs' % (time.time()-before))
+    logger.info('all clfs fit() took %.2fs' % (time.time() - before))
 
     before = time.time()
     uploads_wait_for_legit = predict_and_upload_legit(napi, clfs, x_prediction, ids)
-    logger.info('all legit clfs predict_proba() took %.2fs' % (time.time()-before))
+    logger.info('all legit clfs predict_proba() took %.2fs' % (time.time() - before))
 
     before = time.time()
     uploads_wait_for_mix = predict_and_upload_mix(napi, clfs, tournament_data, x_prediction, ids)
-    logger.info('all mix clfs predict_proba() took %.2fs' % (time.time()-before))
+    logger.info('all mix clfs predict_proba() took %.2fs' % (time.time() - before))
 
     legit_submission_ids = list()
     mix_submission_ids = list()
@@ -243,14 +244,14 @@ def fit_all(clfs: list, X, Y):
     before = time.time()
     for _ in futures.as_completed(wait_for):
         pass
-    logger.info('await fitting took %.2fs' % (time.time()-before))
+    logger.info('await fitting took %.2fs' % (time.time() - before))
 
 
 def fit_clf(X, Y, clf):
     before = time.time()
     clf_str = str(clf).split("(")[0]
     clf.fit(X, Y)
-    time_taken = '%.2fs' % (time.time()-before)
+    time_taken = '%.2fs' % (time.time() - before)
     logger.info('fit() took %s%s (%s)' % (time_taken, ' '*(9-len(time_taken)), clf_str))
     return clf_str
 
@@ -263,9 +264,9 @@ def predict_and_upload_legit(napi, clfs: list, x_prediction, ids):
         wait_for.append(clf_executor.submit(predict_and_upload_one_legit, upload_wait_for, napi, clf, x_prediction, ids))
 
     before = time.time()
-    for f in futures.as_completed(wait_for):
-        pass  # TODO: logger.info('future done, result: %s' % str(f))
-    logger.info('await legit predictions took %.2fs' % (time.time()-before))
+    for _ in futures.as_completed(wait_for):
+        pass
+    logger.info('await legit predictions took %.2fs' % (time.time() - before))
 
     return upload_wait_for
 
@@ -293,11 +294,7 @@ def upload_one_legit(y_prediction, ids, out: str, napi):
         # Save the predictions out to a CSV file
         joined.to_csv(out, index=False)
 
-        # TODO: when api fixed, add the submission_id to  exc pool, async checks status to; if any fails: sys.exit(1)
-        # input("Both concordance and originality should pass. Press enter to continue...")
-        response = napi.upload_predictions(out)
-        # logger.info('upload response: %s' % str(response))
-        return response
+        return napi.upload_predictions(out)
     except Exception as e:
         logger.exception(traceback.format_exc())
         logger.error('error uploading: %s' % str(e))
@@ -329,16 +326,20 @@ def predict_and_upload_mix(napi, clfs: list, tournament_data: pd.DataFrame, x_pr
             checked_combos.add(name_1)
             checked_combos.add(name_2)
 
-            wait_for.append(clf_executor.submit(predict_and_upload_one_mix, napi, uploads_wait_for, clf1, clf2, x_pv, x_pt, ids_v, ids_t))
+            wait_for.append(clf_executor.submit(
+                predict_and_upload_one_mix, napi, uploads_wait_for, (clf1, clf2), (x_pv, x_pt), (ids_v, ids_t)))
 
     before = time.time()
-    for f in futures.as_completed(wait_for):
-        pass  # TODO: logger.info('future done, result: %s' % str(f))
-    logger.info('await mix predictions took %.2fs' % (time.time()-before))
+    for _ in futures.as_completed(wait_for):
+        pass
+    logger.info('await mix predictions took %.2fs' % (time.time() - before))
     return uploads_wait_for
 
 
-def predict_and_upload_one_mix(napi, uploads_wait_for: list, clf1, clf2, x_pv, x_pt, ids_v, ids_t) -> None:
+def predict_and_upload_one_mix(napi, uploads_wait_for: list, clfs: tuple, xs: tuple, ids: tuple) -> None:
+    clf1, clf2, = clfs
+    x_pv, x_pt = xs
+    ids_v, ids_t = ids
     before_one_mix = time.time()
     y_pv = clf1.predict_proba(x_pv)[:, 1]
     y_pt = clf2.predict_proba(x_pt)[:, 1]
@@ -362,13 +363,7 @@ def upload_one_mix(napi, out, ids_v, ids_t, y_pt, y_pv):
         time_taken = '%.2fs' % (time.time() - before_csv_write)
         logger.info('write csv took %s%s (%s)' % (time_taken, ' ' * (10 - len(time_taken)), out))
 
-        # TODO: when api fixed, add the submission_id to  exc pool, async checks status to; if pass: sys.exit(1)
-        before_upload = time.time()
-        response = napi.upload_predictions(out)
-        time_taken = '%.2fs' % (time.time() - before_upload)
-        # logger.info('upload took   %s%s (%s)' % (time_taken, ' '*(10-len(time_taken)), str(response)))
-        # input("Concordance should fail. Press enter to continue...")
-        return response
+        return napi.upload_predictions(out)
     except Exception as e:
         logger.exception(traceback.format_exc())
         logger.error('error uploading: %s' % str(e))
