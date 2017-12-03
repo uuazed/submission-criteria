@@ -5,6 +5,10 @@
 import os
 import logging
 import time
+import traceback
+
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(sys.argv[0])))
 
 from concurrent import futures
 from concurrent.futures import ThreadPoolExecutor
@@ -21,7 +25,10 @@ from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
 from xgboost.sklearn import XGBClassifier
 
 # First Party
-from testing_api import NumerAPI
+from tests.testing_api import NumerAPI
+from submission_criteria.concordance import get_sorted_split
+from submission_criteria.concordance import has_concordance
+from submission_criteria.concordance import get_competition_variables_from_df
 
 DATA_SET_PATH = 'tests/numerai_datasets'
 test_csv = "tests/test_csv"
@@ -38,14 +45,13 @@ clf_executor = ThreadPoolExecutor(max_workers=clf_n_jobs)
 
 def main():
     # when running on circleci, set the vars in the project settings
-    email = os.environ.get('NUMERAPI_EMAIL')
-    password = os.environ.get('NUMERAPI_PASS')
+    public_id = os.environ.get('NUMERAPI_PUBLIC_ID')
+    secret_key = os.environ.get('NUMERAPI_SECRET_KEY')
 
-    if email is None or password is None:
-        raise RuntimeError('set the NUMERAPI_EMAIL and NUMERAPI_PASS environment variables first')
+    if public_id is None or secret_key is None:
+        raise RuntimeError('set the NUMERAPI_PUBLIC_ID and NUMERAPI_SECRET_KEY environment variables first')
 
-    napi = NumerAPI()
-    napi.credentials = (email, password)
+    napi = NumerAPI(public_id=public_id, secret_key=secret_key)
 
     if not os.path.exists(test_csv):
         os.makedirs(test_csv)
@@ -66,6 +72,17 @@ def main():
 
     x_prediction = tournament_data[features]
     ids = tournament_data["id"]
+
+    # TODO: check concordance locally maybe
+    """
+    cluster_ids = {
+        'test': tournament_data[tournament_data.data_type == 'test'].id.copy().values.ravel(),
+        'valid': tournament_data[tournament_data.data_type == 'validation'].id.copy().values.ravel(),
+        'live': tournament_data[tournament_data.data_type == 'live'].id.copy().values.ravel(),
+    }
+    clusters = get_competition_variables_from_df(
+        '1', training_data, tournament_data, cluster_ids['valid'], cluster_ids['test'], cluster_ids['live'])
+    """
 
     clfs = [
         RandomForestClassifier(
@@ -93,15 +110,54 @@ def main():
     uploads_wait_for_mix = predict_and_upload_mix(napi, clfs, tournament_data, x_prediction, ids)
     logger.info('all mix clfs predict_proba() took %.2fs' % (time.time()-before))
 
+    legit_submission_ids = list()
     before = time.time()
     for f in futures.as_completed(uploads_wait_for_legit):
-        pass  # TODO: logger.info('future done, result: %s' % str(f))
+        logger.info('future done, result: %s' % str(f))
+        legit_submission_ids.append(f.result())
     logger.info('await legit uploads took %.2fs' % (time.time() - before))
+
+    while True:
+        statuses = list()
+        for submission_id in legit_submission_ids:
+            statuses.append(upload_executor.submit(napi, check_status, submission_id))
+
+        check_later = list()
+        for f in futures.as_completed(statuses):
+            originality = f.result()['result']['originality']
+            if originality['pending']:
+                check_later.append(f.result()['id'])
+                continue
+            if not originality['value']:
+                logger.error('submission %s failed originality: %s' % (f.result()['id'], str(f.result())))
+                sys.exit(1)
+
+        if len(check_later) == 0:
+            break
+
+        legit_submission_ids.clear()
+        legit_submission_ids = check_later.copy()
 
     before = time.time()
     for f in futures.as_completed(uploads_wait_for_mix):
-        pass  # TODO: logger.info('future done, result: %s' % str(f))
+        logger.info('future done, result: %s' % str(f))
     logger.info('await mix uploads took %.2fs' % (time.time() - before))
+
+
+def check_concordance(submission, clusters, ids):
+    ids_valid, ids_test, ids_live = ids['valid'], ids['test'], ids['live']
+    p1, p2, p3 = get_sorted_split(submission, ids_valid, ids_test, ids_live)
+    c1, c2, c3 = clusters['cluster_1'], clusters['cluster_2'], clusters['cluster_3']
+    return has_concordance(p1, p2, p3, c1, c2, c3)
+
+
+def check_status(napi, submission_id):
+    try:
+        return {'id': submission_id, 'result': napi.submission_status(submission_id)}
+    except Exception as e:
+        logger.exception(traceback.format_exc())
+        logger.error('could not check submission status: %s' % str(e))
+        sys.exit(1)
 
 
 def fit_all(clfs: list, X, Y):
@@ -155,16 +211,22 @@ def predict_and_upload_one_legit(upload_wait_for: list, napi, clf, x_prediction,
 
 
 def upload_one_legit(y_prediction, ids, out: str, napi):
-    results = y_prediction[:, 1]
-    results_df = pd.DataFrame(data={'prediction': results})
-    joined = pd.DataFrame(ids).join(results_df)
+    try:
+        results = y_prediction[:, 1]
+        results_df = pd.DataFrame(data={'probability': results})
+        joined = pd.DataFrame(ids).join(results_df)
 
-    # Save the predictions out to a CSV file
-    joined.to_csv(out, index=False)
+        # Save the predictions out to a CSV file
+        joined.to_csv(out, index=False)
 
-    # TODO: when api fixed, add the submission_id to  exc pool, async checks status to; if any fails: sys.exit(1)
-    # input("Both concordance and originality should pass. Press enter to continue...")
-    napi.upload_prediction(out)
+        # TODO: when api fixed, add the submission_id to  exc pool, async checks status to; if any fails: sys.exit(1)
+        # input("Both concordance and originality should pass. Press enter to continue...")
+        response = napi.upload_predictions(out)
+        logger.info('upload response: %s' % str(response))
+        return response
+    except Exception as e:
+        logger.exception(traceback.format_exc())
+        logger.error('error uploading: %s' % str(e))
 
 
 def predict_and_upload_mix(napi, clfs: list, tournament_data: pd.DataFrame, x_prediction, ids):
@@ -205,21 +267,25 @@ def predict_and_upload_one_mix(napi, uploads_wait_for: list, clf1, clf2, x_pv, x
 
 
 def upload_one_mix(napi, out, ids_v, ids_t, y_pt, y_pv):
-    valid_df = pd.DataFrame(ids_v).join(pd.DataFrame(data={'prediction': y_pv}))
-    test_df = pd.DataFrame(ids_t).join(pd.DataFrame(data={'prediction': y_pt}))
+    try:
+        valid_df = pd.DataFrame(ids_v).join(pd.DataFrame(data={'probability': y_pv}))
+        test_df = pd.DataFrame(ids_t).join(pd.DataFrame(data={'probability': y_pt}))
 
-    before_csv_write = time.time()
-    mix = pd.concat([valid_df, test_df])
-    mix.to_csv(out, index=False)
-    time_taken = '%.2fs' % (time.time() - before_csv_write)
-    logger.info('write csv took %s%s (%s)' % (time_taken, ' ' * (10 - len(time_taken)), out))
+        before_csv_write = time.time()
+        mix = pd.concat([valid_df, test_df])
+        mix.to_csv(out, index=False)
+        time_taken = '%.2fs' % (time.time() - before_csv_write)
+        logger.info('write csv took %s%s (%s)' % (time_taken, ' ' * (10 - len(time_taken)), out))
 
-    # TODO: when api fixed, add the submission_id to  exc pool, async checks status to; if pass: sys.exit(1)
-    before_upload = time.time()
-    response = napi.upload_prediction(out)
-    time_taken = '%.2fs' % (time.time() - before_upload)
-    # logger.info('upload took   %s%s (%s, %s)' % (time_taken, ' '*(10-len(time_taken)), str(response), file_to_upload))
-    # input("Concordance should fail. Press enter to continue...")
+        # TODO: when api fixed, add the submission_id to  exc pool, async checks status to; if pass: sys.exit(1)
+        before_upload = time.time()
+        response = napi.upload_predictions(out)
+        time_taken = '%.2fs' % (time.time() - before_upload)
+        logger.info('upload took   %s%s (%s)' % (time_taken, ' '*(10-len(time_taken)), str(response)))
+        # input("Concordance should fail. Press enter to continue...")
+    except Exception as e:
+        logger.exception(traceback.format_exc())
+        logger.error('error uploading: %s' % str(e))
 
 
 if __name__ == '__main__':

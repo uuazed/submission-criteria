@@ -1,185 +1,493 @@
 # -*- coding: utf-8 -*-
-"""Numerai API Testing."""
 
 # System
 import zipfile
+import json
+import os
+import datetime
+import errno
 import logging
-from datetime import datetime, timedelta
 
 # Third Party
 import requests
-import numpy as np
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-)
-logging.getLogger('testing_api')
+API_TOURNAMENT_URL = 'https://api-tournament.numer.ai'
 
 
 class NumerAPI(object):
-    def __init__(self):
-        api_url = "https://stage-api-numer-ai.herokuapp.com"
-        new_api_url = "https://stage-api-hs-numerai.herokuapp.com"
-        self._login_url = api_url + '/sessions'
-        self._auth_url = api_url + '/upload/auth'
-        self._dataset_url = api_url + '/competitions/current/dataset'
-        self._submissions_url = api_url + '/submissions'
-        self._users_url = api_url + '/users'
-        self.leaderboard_url = api_url + '/competitions'
-        self.new_leaderboard_url = new_api_url + '/leaderboard'
-        self.new_current_leaderboard_url = new_api_url + '/currentLeaderboard'
-        self._credentials = None
 
-    @property
-    def credentials(self):
-        if not hasattr(self, "_credentials"):
-            raise ValueError(
-                "You haven't yet set your email and password credentials.  "
-                "Set it first with NumeraAPI().credentials = ('YOUR_EMAIL', "
-                "'YOUR_PASSWORD')")
-        return self._credentials
+    """Wrapper around the Numerai API"""
 
-    @credentials.setter
-    def credentials(self, value):
-        self._credentials = {"email": value[0], "password": value[1]}
+    def __init__(self, public_id=None, secret_key=None, verbosity="INFO"):
+        """
+        initialize Numerai API wrapper for Python
 
-    def download_current_dataset(self, dest_path='.', unzip=True):
-        file_name = 'numerai_dataset.zip'
-        dest_file_path = '{0}/{1}'.format(dest_path, file_name)
+        public_id: first part of your token generated at
+                   Numer.ai->Account->Custom API keys
+        secret_key: second part of your token generated at
+                    Numer.ai->Account->Custom API keys
+        verbosity: indicates what level of messages should be displayed
+            valid values: "debug", "info", "warning", "error", "critical"
+        """
+        if public_id and secret_key:
+            self.token = (public_id, secret_key)
+        elif not public_id and not secret_key:
+            self.token = None
+        else:
+            print("You need to supply both a public id and a secret key.")
+            self.token = None
 
-        r = requests.get(self._dataset_url, stream=True)
-        if r.status_code != 200:
-            return r.status_code
+        self.logger = logging.getLogger(__name__)
 
-        with open(dest_file_path, 'wb') as f:
-            for chunk in r.iter_content(1024):
+        # set up logging
+        numeric_log_level = getattr(logging, verbosity.upper())
+        if not isinstance(numeric_log_level, int):
+            raise ValueError('invalid verbosity: %s' % verbosity)
+        log_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+        logging.basicConfig(format=log_format, level=numeric_log_level)
+        self.submission_id = None
+
+    def _unzip_file(self, src_path, dest_path, filename):
+        """unzips file located at src_path into destination_path"""
+        self.logger.info("unzipping file...")
+
+        # construct full path (including file name) for unzipping
+        unzip_path = os.path.join(dest_path, filename)
+
+        # create parent directory for unzipped data
+        try:
+            os.makedirs(unzip_path)
+        except OSError as exception:
+            if exception.errno != errno.EEXIST:
+                raise
+
+        # extract data
+        with zipfile.ZipFile(src_path, "r") as z:
+            z.extractall(unzip_path)
+
+        return True
+
+    def download_current_dataset(self, dest_path=".", dest_filename=None,
+                                 unzip=True):
+        """download dataset for current round
+
+        dest_path: desired location of dataset file (optional)
+        dest_filename: desired filename of dataset file (optional)
+        unzip: indicates whether to unzip dataset
+        """
+        self.logger.info("downloading current dataset...")
+
+        # set up download path
+        if dest_filename is None:
+            now = datetime.datetime.now().strftime("%Y%m%d")
+            dest_filename = "numerai_dataset_{0}.zip".format(now)
+        else:
+            # ensure it ends with ".zip"
+            if not dest_filename.endswith(".zip"):
+                dest_filename += ".zip"
+        dataset_path = os.path.join(dest_path, dest_filename)
+
+        if os.path.exists(dataset_path):
+            self.logger.info("target file already exists")
+            return dataset_path
+
+        # get link to current dataset
+        query = "query {dataset}"
+        url = self.raw_query(query)['data']['dataset']
+        # download
+        dataset_res = requests.get(url, stream=True)
+        dataset_res.raise_for_status()
+
+        # create parent folder if necessary
+        try:
+            os.makedirs(dest_path)
+        except OSError as exception:
+            if exception.errno != errno.EEXIST:
+                raise
+
+        # write dataset to file
+        with open(dataset_path, "wb") as f:
+            for chunk in dataset_res.iter_content(1024):
                 f.write(chunk)
 
+        # unzip dataset
         if unzip:
-            with zipfile.ZipFile(dest_file_path, "r") as z:
-                z.extractall(dest_path)
-        return r.status_code
+            # remove the ".zip" in the end
+            dataset_name = dest_filename[:-4]
+            self._unzip_file(dataset_path, dest_path, dataset_name)
 
-    def get_new_leaderboard(self, n=None):
-        if n is None:
-            url = self.new_current_leaderboard_url
-        else:
-            url = self.new_leaderboard_url + "?round={}".format(n)
-        r = requests.get(url)
-        return r.json(), r.status_code
+        return dataset_path
 
-    def get_leaderboard(self):
-        now = datetime.now()
-        tdelta = timedelta(microseconds=55296e5)
-        dt = now - tdelta
-        dt_str = dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    def _handle_call_error(self, errors):
+        if isinstance(errors, list):
+            for error in errors:
+                if "message" in error:
+                    self.logger.error(error['message'])
+        elif isinstance(errors, dict):
+            if "detail" in errors:
+                self.logger.error(errors['detail'])
 
-        url = self.leaderboard_url + '?{ leaderboard :'
-        url += ' current , end_date :{ $gt : %s }}'
-        r = requests.get((url % dt_str).replace(' ', '%22'))
-        if r.status_code != 200:
-            return None, r.status_code
-        return r.json(), r.status_code
+    def raw_query(self, query, variables=None, authorization=False):
+        """send a raw request to the Numerai's GraphQL API
 
-    def get_earnings_per_round(self, username):
-        r = requests.get('{0}/{1}'.format(self._users_url, username))
-        if r.status_code != 200:
-            return (None, r.status_code)
+        query (str): the query
+        variables (dict): dict of variables
+        authorization (bool): does the request require authorization
+        """
+        body = {'query': query,
+                'variables': variables}
+        headers = {'Content-type': 'application/json',
+                   'Accept': 'application/json'}
+        if authorization and self.token:
+            public_id, secret_key = self.token
+            headers['Authorization'] = \
+                'Token {}${}'.format(public_id, secret_key)
+        r = requests.post(API_TOURNAMENT_URL, json=body, headers=headers)
+        result = r.json()
+        if "errors" in result:
+            self._handle_call_error(result['errors'])
+            # fail!
+            print(str(result['errors']))
+            raise ValueError
 
-        rj = r.json()
-        rewards = rj['rewards']
-        earnings = np.zeros(len(rewards))
-        for i, _ in enumerate(rewards):
-            earnings[i] = rewards[i]['amount']
-        return (earnings, r.status_code)
+        return result
 
-    def get_scores(self, username):
-        r = requests.get('{0}/{1}'.format(self._users_url, username))
-        if r.status_code != 200:
-            return (None, r.status_code)
+    def get_leaderboard(self, round_num=0):
+        """ retrieves the leaderboard for the given round
 
-        rj = r.json()
-        results = rj['submissions']['results']
-        scores = np.zeros(len(results))
-        for i, _ in enumerate(results):
-            scores[i] = results[i]['accuracy_score']
-        return (scores, r.status_code)
+        round_num: The round you are interested in, defaults to current round.
+        """
+        self.logger.info("getting leaderboard for round {}".format(round_num))
+        query = '''
+            query($number: Int!) {
+              rounds(number: $number) {
+                leaderboard {
+                  consistency
+                  concordance {
+                    pending
+                    value
+                  }
+                  originality {
+                    pending
+                    value
+                  }
 
-    def get_user(self, username):
-        leaderboard, status_code = self.get_leaderboard()
-        if status_code != 200:
-            return (None, None, None, None, status_code)
+                  liveLogloss
+                  submissionId
+                  username
+                  validationLogloss
+                  paymentGeneral {
+                    nmrAmount
+                    usdAmount
+                  }
+                  paymentStaking {
+                    nmrAmount
+                    usdAmount
+                  }
+                  totalPayments {
+                    nmrAmount
+                    usdAmount
+                  }
+                }
+              }
+            }
+        '''
+        arguments = {'number': round_num}
+        result = self.raw_query(query, arguments)
+        return result['data']['rounds'][0]['leaderboard']
 
-        for user in leaderboard[0]['leaderboard']:
-            if user['username'] == username:
-                return (user['username'], np.float(user['logloss']['public']), user['rank']['public'], user['earned'], status_code)
-        return (None, None, None, None, status_code)
+    def get_staking_leaderboard(self, round_num=0):
+        """ retrieves the leaderboard of the staking competition for the given
+        round
 
-    def login(self):
-        r = requests.post(self._login_url, data=self.credentials)
-        if r.status_code != 201:
-            return (None, None, None, r.status_code)
+        round_num: The round you are interested in, defaults to current round.
+        """
+        self.logger.info("getting stakes for round {}".format(round_num))
+        query = '''
+            query($number: Int!) {
+              rounds(number: $number) {
+                leaderboard {
+                  consistency
+                  liveLogloss
+                  username
+                  validationLogloss
+                  stake {
+                    insertedAt
+                    soc
+                    confidence
+                    value
+                    txHash
+                  }
 
-        rj = r.json()
-        return rj['accessToken'], rj['refreshToken'], rj['id'], r.status_code
+                }
+              }
+            }
+        '''
+        arguments = {'number': round_num}
+        result = self.raw_query(query, arguments)
+        stakes = result['data']['rounds'][0]['leaderboard']
+        # filter those with actual stakes
+        stakes = [item for item in stakes if item["stake"]["soc"] is not None]
+        return stakes
 
-    def authorize(self, file_path):
-        accessToken, _, _, status_code = self.login()
-        if status_code != 201:
-            return (None, None, None, status_code)
+    def get_competitions(self):
+        """ get information about rounds """
+        self.logger.info("getting rounds...")
 
-        headers = {'Authorization': 'Bearer {0}'.format(accessToken)}
+        query = '''
+            query {
+              rounds {
+                number
+                resolveTime
+                datasetId
+                openTime
+                resolvedGeneral
+                resolvedStaking
+              }
+            }
+        '''
+        result = self.raw_query(query)
+        return result['data']['rounds']
 
-        r = requests.post(self._auth_url,
-                          data={'filename': file_path.split('/')[-1], 'mimetype': 'text/csv'},
-                          headers=headers)
-        if r.status_code != 200:
-            return (None, None, None, r.status_code)
+    def get_current_round(self):
+        """get information about the current active round"""
+        # zero is an alias for the current round!
+        query = '''
+            query {
+              rounds(number: 0) {
+                number
+              }
+            }
+        '''
+        data = self.raw_query(query)
+        round_num = data['data']['rounds'][0]["number"]
+        return round_num
 
-        rj = r.json()
-        return rj['filename'], rj['signedRequest'], headers, r.status_code
+    def get_submission_ids(self):
+        """get dict with username->submission_id mapping"""
+        query = """
+            query {
+              rounds(number: 0) {
+                leaderboard {
+                  username
+                  submissionId
+                }
+            }
+        }
+        """
+        data = self.raw_query(query)['data']['rounds'][0]['leaderboard']
+        mapping = {item['username']: item['submissionId'] for item in data}
+        return mapping
 
-    def get_current_competition(self):
-        now = datetime.now()
-        leaderboard, status_code = self.get_leaderboard()
-        if status_code != 200:
-            return None, None, None, None, status_code
+    def get_user(self):
+        """get all information about you! """
+        query = """
+          query {
+            user {
+              username
+              banned
+              assignedEthAddress
+              availableNmr
+              availableUsd
+              email
+              id
+              mfaEnabled
+              status
+              insertedAt
+              apiTokens {
+                name
+                public_id
+                scopes
+              }
+            }
+          }
+        """
+        data = self.raw_query(query, authorization=True)['data']['user']
+        return data
 
-        for c in leaderboard:
-            start_date = datetime.strptime(c['start_date'], '%Y-%m-%dT%H:%M:%S.%fZ')
-            end_date = datetime.strptime(c['end_date'], '%Y-%m-%dT%H:%M:%S.%fZ')
-            if start_date < now < end_date:
-                return c['dataset_id'], c['_id'], status_code
+    def get_payments(self):
+        """all your payments"""
+        query = """
+          query {
+            user {
+              payments {
+                nmrAmount
+                round {
+                  number
+                  openTime
+                  resolveTime
+                  resolvedGeneral
+                  resolvedStaking
+                }
+                tournament
+                usdAmount
+              }
 
-    def upload_prediction(self, file_path) -> int:
-        # until issues with the api is solved, just say 'all ok'
-        import time
-        # simulate uploading is slow
-        time.sleep(3)
-        return 200
+            }
+          }
+        """
+        data = self.raw_query(query, authorization=True)['data']['user']
+        return data['payments']
 
-        filename, signedRequest, headers, status_code = self.authorize(file_path)
-        if status_code != 200:
-            logger.error('not authorized, status code: %s' % str(status_code))
-            return status_code
+    def get_transactions(self):
+        """all deposits and withdrawals"""
+        query = """
+          query {
+            user {
 
-        dataset_id, _, status_code = self.get_current_competition()
-        if status_code != 200:
-            logger.error('could not get current competition, status code: %s' % str(status_code))
-            return status_code
+              nmrDeposits {
+                from
+                id
+                posted
+                status
+                to
+                txHash
+                value
+              }
+              nmrWithdrawals {
+                from
+                id
+                posted
+                status
+                to
+                txHash
+                value
+              }
+              usdWithdrawals {
+                ethAmount
+                confirmTime
+                from
+                posted
+                sendTime
+                status
+                to
+                txHash
+                usdAmount
+              }
+            }
+          }
+        """
+        data = self.raw_query(query, authorization=True)['data']['user']
+        return data
 
-        with open(file_path, 'rb') as fp:
-            r = requests.Request('PUT', signedRequest, data=fp.read())
-            prepped = r.prepare()
-            s = requests.Session()
-            resp = s.send(prepped)
-            if resp.status_code != 200:
-                logger.error('could PUT to %s, status code: %s' % (str(signedRequest), str(status_code)))
-                return resp.status_code
+    def get_stakes(self):
+        """all your stakes"""
+        query = """
+          query {
+            user {
+              stakeTxs {
+                confidence
+                insertedAt
+                roundNumber
+                soc
+                staker
+                status
+                txHash
+                value
+              }
+            }
+          }
+        """
+        data = self.raw_query(query, authorization=True)['data']['user']
+        return data['stakeTxs']
 
-        r = requests.post(self._submissions_url,
-                          data={"dataset_id": dataset_id, "filename": filename},
-                          headers=headers)
+    def submission_status(self, submission_id=None):
+        """display submission status of the last submission associated with
+        the account
 
-        return r.status_code
+        submission_id: submission of interest, defaults to the last submission
+            done with the account
+        """
+        if submission_id is None:
+            submission_id = self.submission_id
+
+        if submission_id is None:
+            raise ValueError('You need to submit something first or provide a submission ID')
+
+        query = '''
+            query($submission_id: String!) {
+              submissions(id: $submission_id) {
+                originality {
+                  pending
+                  value
+                }
+                concordance {
+                  pending
+                  value
+                }
+                consistency
+                validation_logloss
+              }
+            }
+            '''
+        variable = {'submission_id': submission_id}
+        data = self.raw_query(query, variable, authorization=True)
+        status = data['data']['submissions'][0]
+        return status
+
+    def upload_predictions(self, file_path):
+        """uploads predictions from file
+
+        file_path: CSV file with predictions that will get uploaded
+        """
+        self.logger.info("uploading prediction...")
+
+        auth_query = \
+            '''
+            query($filename: String!) {
+                submission_upload_auth(filename: $filename) {
+                    filename
+                    url
+                }
+            }
+            '''
+        variable = {'filename': os.path.basename(file_path)}
+        submission_resp = self.raw_query(auth_query, variable, authorization=True)
+        submission_auth = submission_resp['data']['submission_upload_auth']
+        with open(file_path, 'rb') as fh:
+            requests.put(submission_auth['url'], data=fh.read())
+        create_query = \
+            '''
+            mutation($filename: String!) {
+                create_submission(filename: $filename) {
+                    id
+                }
+            }
+            '''
+        variables = {'filename': submission_auth['filename']}
+        create = self.raw_query(create_query, variables, authorization=True)
+        self.submission_id = create['data']['create_submission']['id']
+        return self.submission_id
+
+    def stake(self, confidence, value):
+        """ participate in the staking competition
+
+        confidence: your confidence (C) value
+        value: amount of NMR you are willing to stake
+        """
+
+        query = '''
+          mutation($code: String,
+            $confidence: String!
+            $password: String
+            $round: Int!
+            $value: String!) {
+              stake(code: $code
+                    confidence: $confidence
+                    password: $password
+                    round: $round
+                    value: $value) {
+                id
+                status
+                txHash
+                value
+              }
+        }
+        '''
+        arguments = {'code': 'somecode',
+                     'confidence': str(confidence),
+                     'password': "somepassword",
+                     'round': self.get_current_round(),
+                     'value': str(value)}
+        result = self.raw_query(query, arguments, authorization=True)
+        return result
