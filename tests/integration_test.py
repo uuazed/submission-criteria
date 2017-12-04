@@ -27,6 +27,8 @@ from xgboost.sklearn import XGBClassifier
 sys.path.insert(0, os.path.dirname(os.path.dirname(sys.argv[0])))
 
 from tests.testing_api import NumerAPI
+
+# the methods we're testing
 from submission_criteria.concordance import get_sorted_split
 from submission_criteria.concordance import has_concordance
 from submission_criteria.concordance import get_competition_variables_from_df
@@ -51,11 +53,16 @@ submission_executor = ThreadPoolExecutor(max_workers=2)
 
 class NumeraiApiWrapper(NumerAPI):
     """
-    Skips uploading to server to check concordance. Originality is only checked against previous submissions
-    from this test. Next step would be to make the numerapi a python package and publish it on pypi so we can
-    include it and use the "real" methods for concordance/originality and not copies that will get out of sync.
+    Skips uploading to server to check concordance/originality; not an actual integration test
+    if this wrapper is used, but the relevant parts are tested. Use the normal NumerAPI instead
+    of NumerApiWrapper and this test will be an integration test behaving in the same way, but
+    since there's not dedicated test token that can be used, and no zip support on upload, and
+    there's roughly 500 MB currently needing to be uploaded every time this test is run, it's
+    not always practical.
 
-    Use NumerAPI normally instead of NumerApiWrapper and this test will behave in the same way.
+    Probably we should mock submission-criteria with an in-memory postgresql db, and try to call
+    the relevant methods from this wrapper to avoid trying to mock http requests (we're not
+    testing the NumerAPI after all).
     """
     def __init__(self, public_id=None, secret_key=None, verbosity="INFO"):
         super(NumeraiApiWrapper, self).__init__(public_id, secret_key, verbosity)
