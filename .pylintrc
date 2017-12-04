@@ -6,7 +6,7 @@ max-branches=22
 max-statements=150
 min-similarity-lines=7
 max-args=7
-disable=W0141,multiple-statements,C0111,C0103,E1101,bare-except,undefined-loop-variable,global-statement,import-error,locally-disabled,len-as-condition,logging-format-interpolation,broad-except,unsubscriptable-object,cell-var-from-loop,wrong-import-position,logging-not-lazy,E402
+disable=W0141,multiple-statements,C0111,C0103,E1101,bare-except,undefined-loop-variable,global-statement,import-error,locally-disabled,len-as-condition,logging-format-interpolation,broad-except,unsubscriptable-object,cell-var-from-loop,wrong-import-position,logging-not-lazy
 
 [TYPECHECK]
 ignored-modules = numpy, numpy.random, tensorflow
