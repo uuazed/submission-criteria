@@ -50,6 +50,13 @@ submission_executor = ThreadPoolExecutor(max_workers=2)
 
 
 class NumeraiApiWrapper(NumerAPI):
+    """
+    Skips uploading to server to check concordance. Originality is only checked against previous submissions
+    from this test. Next step would be to make the numerapi a python package and publish it on pypi so we can
+    include it and use the "real" methods for concordance/originality and not copies that will get out of sync.
+
+    Use NumerAPI normally instead of NumerApiWrapper and this test will behave in the same way.
+    """
     def __init__(self, public_id=None, secret_key=None, verbosity="INFO"):
         super(NumeraiApiWrapper, self).__init__(public_id, secret_key, verbosity)
         self.checked = set()
@@ -148,6 +155,7 @@ def main():
         # AdaBoostClassifier(),
         GaussianNB(),
         QuadraticDiscriminantAnalysis(tol=1.0e-3),
+        # last item can have multiple jobs since it may be the last to be processed so we have an extra core
         LogisticRegression(n_jobs=2, solver='sag', C=1, tol=1e-2, random_state=42, max_iter=50)
     ]
 
