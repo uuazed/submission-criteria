@@ -21,6 +21,7 @@ setup(
         "mysqlclient",
         "pylint",
         "flake8",
-        "xgboost"
+        "xgboost",
+        "requests"
     ],
 )
