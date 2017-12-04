@@ -33,6 +33,9 @@ from submission_criteria.concordance import get_competition_variables_from_df
 
 
 DATA_SET_PATH = 'tests/numerai_datasets'
+DATA_SET_FILE = 'numerai_dataset'
+TRAIN_FILE = 'numerai_training_data.csv'
+TOURN_FILE = 'numerai_tournament_data.csv'
 test_csv = "tests/test_csv"
 clf_n_jobs = 2
 
@@ -115,12 +118,15 @@ def main():
     if not os.path.exists(DATA_SET_PATH):
         logger.info("Downloading the current dataset...")
         os.makedirs(DATA_SET_PATH)
-        napi.download_current_dataset(dest_path=DATA_SET_PATH, unzip=True)
+        napi.download_current_dataset(dest_path=DATA_SET_PATH, dest_filename=DATA_SET_FILE + '.zip', unzip=True)
+        import shutil
+        shutil.move(os.path.join(DATA_SET_PATH, DATA_SET_FILE, TRAIN_FILE), os.path.join(DATA_SET_PATH, TRAIN_FILE))
+        shutil.move(os.path.join(DATA_SET_PATH, DATA_SET_FILE, TOURN_FILE), os.path.join(DATA_SET_PATH, TOURN_FILE))
     else:
         logger.info("Found old data to use.")
 
-    training_data = pd.read_csv('%s/numerai_training_data.csv' % DATA_SET_PATH, header=0)
-    tournament_data = pd.read_csv('%s/numerai_tournament_data.csv' % DATA_SET_PATH, header=0)
+    training_data = pd.read_csv('%s/%s' % (DATA_SET_PATH, TRAIN_FILE), header=0)
+    tournament_data = pd.read_csv('%s/%s' % (DATA_SET_PATH, TOURN_FILE), header=0)
 
     napi.set_data(tournament_data, training_data)
 
