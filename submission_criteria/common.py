@@ -91,10 +91,10 @@ def update_loglosses(submission_id):
 
     # Get the truth data
     public_targets_db = connect_to_public_targets_db()
-    query = "SELECT id, target FROM tournament_historical_encrypted WHERE data_type = 'validation' AND version = 1;"
+    query = "SELECT id, target FROM tournament_historical_encrypted WHERE data_type = 'validation' AND version = 2;"
     validation_data = pd.read_sql(query, public_targets_db)
     validation_data.sort_values("id", inplace=True)
-    test_data = pd.read_sql("SELECT id, target FROM tournament_historical_encrypted WHERE data_type = 'test' AND version = 1;", public_targets_db)
+    test_data = pd.read_sql("SELECT id, target FROM tournament_historical_encrypted WHERE data_type = 'test' AND version = 2;", public_targets_db)
     test_data.sort_values("id", inplace=True)
 
     # Calculate logloss
