@@ -47,9 +47,11 @@ class DatabaseManager(object):
         filemanager : FileManager
             S3 Bucket data access object for querying competition datasets
         """
+        print("Calculating consistency for submission_id {}...".format(submission_id))
         round_number = self.get_round_number(submission_id)
 
         # Get the tournament data
+        print("Getting public dataset for round number {}".format(round_number))
         extract_dir = filemanager.download_dataset(round_number)
         tournament_data = pd.read_csv(os.path.join(extract_dir, "numerai_tournament_data.csv"))
         # Get the user submission
@@ -59,7 +61,9 @@ class DatabaseManager(object):
         validation_data = tournament_data[tournament_data.data_type == "validation"]
         validation_submission_data = submission_data[submission_data.id.isin(validation_data.id.values)]
         validation_eras = np.unique(validation_data.era.values)
+        print(validation_eras)
         num_eras = len(validation_eras)
+        assert num_eras == 12
 
         # Calculate era loglosses
         better_than_random_era_count = 0
@@ -67,6 +71,7 @@ class DatabaseManager(object):
         for era in validation_eras:
             era_data = validation_data[validation_data.era == era]
             submission_era_data = validation_submission_data[validation_submission_data.id.isin(era_data.id.values)]
+            assert len(submission_era_data > 0), "There must be data for every era"
             era_data = era_data.sort_values(["id"])
             submission_era_data = submission_era_data.sort_values(["id"])
             logloss = log_loss(era_data.target.values, submission_era_data.probability.values)
