@@ -154,12 +154,9 @@ def main():
     clfs = [
         RandomForestClassifier(
             n_estimators=15, max_features=1, max_depth=2, n_jobs=1, criterion='entropy', random_state=42),
-        # GradientBoostingClassifier(learning_rate=0.05, subsample=0.5, max_depth=6, n_estimators=10),
         XGBClassifier(learning_rate=0.1, subsample=0.4, max_depth=2, n_estimators=20, nthread=1, seed=42),
-        # KNeighborsClassifier(3, n_jobs=1),
         DecisionTreeClassifier(max_depth=5, random_state=42),
         MLPClassifier(alpha=1, hidden_layer_sizes=(25, 25), random_state=42),
-        # AdaBoostClassifier(),
         GaussianNB(),
         QuadraticDiscriminantAnalysis(tol=1.0e-3),
         # last item can have multiple jobs since it may be the last to be processed so we have an extra core
