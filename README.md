@@ -85,8 +85,8 @@ Deployment
 ==========
 - Create Elastic Beanstalk environemnt: `./deploy/new-environment.sh api-ml-production api-ml-production`
 - Create a new environment: `./deploy/gen-dockerrun.sh prod && ./deploy/new-environment.sh api-ml-production api-ml-production`
-- Deploy changes: `./deploy/push.sh prod api-ml-production`
-- For staging environment, replace `prod` with `staging` in the above command.
+- Deploy to Production:  `./deploy/push.sh prod api-ml-production && eb deploy --staged api-ml-production`
+- Deploy to Staging: `./deploy/push.sh staging api-ml-production && eb deploy --staged api-ml-staging-11-30`
 
 Community
 =========

@@ -20,6 +20,8 @@ setup(
         "sqlalchemy",
         "mysqlclient",
         "pylint",
-        "flake8"
+        "flake8",
+        "xgboost",
+        "requests"
     ],
 )
