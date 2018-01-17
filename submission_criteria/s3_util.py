@@ -4,12 +4,10 @@
 import os
 import zipfile
 import logging
-import tempfile
 
 # Third Party
 import boto3
 import botocore
-import pandas as pd
 
 
 S3_BUCKET = os.environ.get("S3_UPLOAD_BUCKET", "numerai-production-uploads")
@@ -56,11 +54,7 @@ class FileManager(object):
             if not os.path.isfile(full_filename):
                 print("Downloading {} from S3 bucket {}".format(full_filename, self.bucket))
                 try:
-                    with tempfile.NamedTemporaryFile() as temp_file, open(temp_file.name, 'r+b') as data_file:
-                        self.s3.meta.client.download_fileobj(self.bucket, s3_file, data_file)
-                        df = pd.read_csv(data_file)
-                        df.to_hdf(full_filename.replace('.csv', '.hd5'), 'submission_data')
-
+                    self.s3.meta.client.download_file(self.bucket, s3_file, full_filename)
                 except botocore.exceptions.EndpointConnectionError:
 
                     if self.log:
