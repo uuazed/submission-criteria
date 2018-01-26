@@ -12,7 +12,7 @@ jobs:
           keys:
             - v1-python-dependencies-{{ checksum "~/repo/setup.py" }}
             - v1-python-dependencies
-      - run: 
+      - run:
           name: Install Python Dependencies
           command: |
             python3 -m venv venv
@@ -38,6 +38,7 @@ jobs:
             . venv/bin/activate
             ./tests/benchmark_originality.py
             ./tests/test_server_unittests.py
+            ./tests/test_s3_util.py
             ./tests/integration_test.py
       - run:
           name: Install AWS CLI
